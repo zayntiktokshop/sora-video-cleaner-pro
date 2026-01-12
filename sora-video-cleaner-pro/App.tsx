@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useRef } from 'react';
 import { TaskStatus, ProcessLog } from './types';
 import { submitTask, pollTask } from './services/kieService';
@@ -53,7 +52,6 @@ const App: React.FC = () => {
         addLog('   ↳ 正在加载 WASM 核心...', 'info');
         const { createFFmpeg } = window.FFmpeg;
         
-        // Vercel 部署环境下，即便有 Header，显式指定 corePath 也是最稳妥的做法
         ffmpegRef.current = createFFmpeg({ 
           log: true,
           corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
@@ -72,11 +70,20 @@ const App: React.FC = () => {
       const { fetchFile } = window.FFmpeg;
 
       addLog('   ↳ 正在导入媒体流...', 'info');
-      ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(source));
+      // 兼容处理：如果是URL字符串需转blob，如果是File对象直接用
+      let fileData;
+      if (typeof source === 'string') {
+          const response = await fetch(source);
+          const blob = await response.blob();
+          fileData = await fetchFile(blob);
+      } else {
+          fileData = await fetchFile(source);
+      }
+      
+      ffmpeg.FS('writeFile', 'input.mp4', fileData);
 
       addLog('   ↳ 执行深度脱敏指令...', 'warning');
       
-      // 使用更稳健的参数：清除所有元数据 + 轻微像素噪点重构
       await ffmpeg.run(
         '-i', 'input.mp4',
         '-map_metadata', '-1',
@@ -84,7 +91,7 @@ const App: React.FC = () => {
         '-c:v', 'libx264',
         '-crf', '24',
         '-preset', 'ultrafast',
-        '-c:a', 'copy', // 保持音频以节省时间，如需音频脱敏可改为 'aac'
+        '-c:a', 'copy', 
         'output.mp4'
       );
 
@@ -109,6 +116,11 @@ const App: React.FC = () => {
       addLog('配置错误: 请检查 API Key 或链接', 'error');
       return;
     }
+    
+    // 每次开始新任务前重置结果
+    setCloudVideoUrl(null);
+    setFinalVideoUrl(null);
+
     try {
       setStatus(TaskStatus.SUBMITTING);
       addLog('🚀 正在请求云端去水印...', 'info');
@@ -129,10 +141,11 @@ const App: React.FC = () => {
         setCloudVideoUrl(resultUrl);
         addLog('✅ 阶段一：云端去水印完成', 'success');
         setProgress(100);
+        // 这里关键：设为 IDLE 才能再次点击按钮，且不影响显示
+        setStatus(TaskStatus.IDLE); 
       } else {
         throw new Error("云端处理超时，请稍后检查 Kie.ai 控制台");
       }
-      setStatus(TaskStatus.IDLE);
     } catch (e: any) {
       addLog(e.message, 'error');
       setStatus(TaskStatus.FAILED);
@@ -182,7 +195,9 @@ const App: React.FC = () => {
             <div className="space-y-4">
               <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Kie.ai API Key" className="w-full bg-black/40 border border-white/5 p-4 rounded-2xl outline-none focus:border-blue-500/50 transition-all text-sm" />
               <input type="text" value={videoUrl} onChange={e => setVideoUrl(e.target.value)} placeholder="Sora Share Link" className="w-full bg-black/40 border border-white/5 p-4 rounded-2xl outline-none focus:border-blue-500/50 transition-all text-sm" />
-              <button onClick={handlePhase1} disabled={status !== TaskStatus.IDLE} className="w-full bg-blue-600 p-4 rounded-2xl font-bold uppercase text-[10px] tracking-widest hover:bg-blue-500 transition-all disabled:opacity-30 shadow-lg shadow-blue-600/20">开始云端提取</button>
+              <button onClick={handlePhase1} disabled={status === TaskStatus.SUBMITTING || status === TaskStatus.PROCESSING} className="w-full bg-blue-600 p-4 rounded-2xl font-bold uppercase text-[10px] tracking-widest hover:bg-blue-500 transition-all disabled:opacity-30 shadow-lg shadow-blue-600/20">
+                 {status === TaskStatus.PROCESSING ? '处理中...' : '开始云端提取'}
+              </button>
             </div>
           </div>
 
@@ -209,19 +224,43 @@ const App: React.FC = () => {
                 </div>
              </div>
              
-             <div className="flex-grow">
+             <div className="flex-grow mb-6 overflow-y-auto max-h-[200px]">
                <Logger logs={logs} />
              </div>
              
+             {/* 🔥 核心修复点：只要有源视频，就立刻显示视频播放器和下载按钮 */}
              {(cloudVideoUrl || localFile) && !finalVideoUrl && (
-               <div className="mt-6 p-6 bg-blue-500/5 border border-blue-500/10 rounded-2xl animate-in fade-in zoom-in duration-500">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                    <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">物理脱敏引擎已就绪</p>
+               <div className="space-y-4 animate-in fade-in zoom-in duration-500">
+                  <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-2xl">
+                    <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-3">
+                      <i className="fas fa-check-circle mr-2"></i>
+                      步骤一完成：原始无水印视频
+                    </p>
+                    
+                    {/* 强制显示视频 */}
+                    <video 
+                      src={cloudVideoUrl || (localFile ? URL.createObjectURL(localFile) : '')} 
+                      controls 
+                      className="w-full rounded-lg bg-black shadow-lg mb-4" 
+                    />
+                    
+                    {/* 增加【仅下载】按钮，防止你不想做第二步 */}
+                    {cloudVideoUrl && (
+                      <a href={cloudVideoUrl} target="_blank" rel="noreferrer" download="step1_result.mp4" className="block w-full text-center bg-blue-500/10 hover:bg-blue-500/20 py-2 rounded-lg text-[9px] font-bold text-blue-400 transition-all border border-blue-500/20 mb-4">
+                        仅下载此视频 (跳过步骤二)
+                      </a>
+                    )}
+
+                    <div className="pt-4 border-t border-white/5">
+                      <div className="flex items-center gap-2 mb-3 opacity-70">
+                        <i className="fas fa-level-down-alt text-gray-500"></i>
+                        <p className="text-[9px] font-bold text-gray-500 uppercase">可选操作：深度清洗</p>
+                      </div>
+                      <button onClick={runPhysicalCleaning} disabled={status === TaskStatus.CLEANING} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-blue-600/20">
+                        执行深度脱敏 (RE-ENCODE)
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={runPhysicalCleaning} disabled={status === TaskStatus.CLEANING} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-blue-600/20">
-                    执行深度脱敏 (RE-ENCODE)
-                  </button>
                </div>
              )}
 
