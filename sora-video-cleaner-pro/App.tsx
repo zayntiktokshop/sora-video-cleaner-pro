@@ -19,7 +19,6 @@ const App: React.FC = () => {
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   
-  const activeTaskId = useRef<string | null>(null);
   const ffmpegRef = useRef<any>(null);
   const isFFmpegLoaded = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,17 +45,17 @@ const App: React.FC = () => {
     try {
       setStatus(TaskStatus.CLEANING);
       setProgress(0);
-      addLog('🛡️ [核心引擎] 启动物理级脱敏 (单线程模式)...', 'info');
+      addLog('🛡️ [核心引擎] 启动物理级脱敏 (多线程高性能)...', 'info');
 
       if (!isFFmpegLoaded.current) {
         addLog('   ↳ 正在加载 WASM 核心...', 'info');
         const { createFFmpeg } = window.FFmpeg;
         
-        // 🔥 核心修改：使用 @ffmpeg/core-st (Single Threaded) 单线程版本
-        // 这个版本不需要 SharedArrayBuffer，可以在无 Headers 环境下完美运行！
+        // 🔥 改回：使用标准多线程核心 (core@0.11.0)
+        // 必须配合 vercel.json 里的 headers 才能运行
         ffmpegRef.current = createFFmpeg({ 
           log: true,
-          corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+          corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
         });
 
         ffmpegRef.current.setProgress(({ ratio }: { ratio: number }) => {
@@ -65,14 +64,13 @@ const App: React.FC = () => {
 
         await ffmpegRef.current.load();
         isFFmpegLoaded.current = true;
-        addLog('   ↳ WASM 引擎就绪 (兼容模式)。', 'success');
+        addLog('   ↳ WASM 引擎就绪 (多线程)。', 'success');
       }
 
       const ffmpeg = ffmpegRef.current;
       const { fetchFile } = window.FFmpeg;
 
       addLog('   ↳ 正在导入媒体流...', 'info');
-      // 兼容处理：如果是URL字符串需转blob，如果是File对象直接用
       let fileData;
       if (typeof source === 'string') {
           const response = await fetch(source);
@@ -103,7 +101,7 @@ const App: React.FC = () => {
       
       setFinalVideoUrl(resultUrl);
       setStatus(TaskStatus.COMPLETED);
-      addLog('🎉 物理脱敏成功！文件已净化并重构。', 'success');
+      addLog('🎉 物理脱敏成功！', 'success');
       setProgress(100);
 
     } catch (error: any) {
@@ -113,13 +111,12 @@ const App: React.FC = () => {
     }
   };
 
+  // ... (handlePhase1 和其他部分保持不变，直接用下面的完整代码)
   const handlePhase1 = async () => {
     if (!apiKey.trim() || !videoUrl.trim()) {
       addLog('配置错误: 请检查 API Key 或链接', 'error');
       return;
     }
-    
-    // 每次开始新任务前重置结果
     setCloudVideoUrl(null);
     setFinalVideoUrl(null);
 
@@ -143,10 +140,9 @@ const App: React.FC = () => {
         setCloudVideoUrl(resultUrl);
         addLog('✅ 阶段一：云端去水印完成', 'success');
         setProgress(100);
-        // 这里关键：设为 IDLE 才能再次点击按钮，且不影响显示
         setStatus(TaskStatus.IDLE); 
       } else {
-        throw new Error("云端处理超时，请稍后检查 Kie.ai 控制台");
+        throw new Error("云端处理超时");
       }
     } catch (e: any) {
       addLog(e.message, 'error');
@@ -181,7 +177,7 @@ const App: React.FC = () => {
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
             <i className="fas fa-shield-alt text-white text-sm"></i>
           </div>
-          <h1 className="font-black text-lg tracking-tighter uppercase">SoraCleaner <span className="text-blue-500 font-light">Vercel Edition</span></h1>
+          <h1 className="font-black text-lg tracking-tighter uppercase">SoraCleaner <span className="text-blue-500 font-light">PRO</span></h1>
         </div>
         <div className={`text-[9px] font-bold px-3 py-1 rounded-full border uppercase tracking-widest transition-colors ${status === TaskStatus.COMPLETED ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>
            STATUS: {status}
@@ -238,6 +234,7 @@ const App: React.FC = () => {
                       步骤一完成：原始无水印视频
                     </p>
                     
+                    {/* 注意：这里的预览可能会因为 Headers 黑屏，但下载按钮绝对可用！ */}
                     <video 
                       src={cloudVideoUrl || (localFile ? URL.createObjectURL(localFile) : '')} 
                       controls 
@@ -246,7 +243,8 @@ const App: React.FC = () => {
                     
                     {cloudVideoUrl && (
                       <a href={cloudVideoUrl} target="_blank" rel="noreferrer" download="step1_result.mp4" className="block w-full text-center bg-blue-500/10 hover:bg-blue-500/20 py-2 rounded-lg text-[9px] font-bold text-blue-400 transition-all border border-blue-500/20 mb-4">
-                        仅下载此视频 (跳过步骤二)
+                        <i className="fas fa-download mr-1"></i> 
+                        无法预览？点此直接下载视频
                       </a>
                     )}
 
@@ -255,9 +253,8 @@ const App: React.FC = () => {
                         <i className="fas fa-level-down-alt text-gray-500"></i>
                         <p className="text-[9px] font-bold text-gray-500 uppercase">可选操作：深度清洗</p>
                       </div>
-                      <button onClick={runPhysicalCleaning} disabled={status === TaskStatus.CLEANING} className="w-full bg-emerald-600 hover:bg-emerald-500 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2">
-                        {status === TaskStatus.CLEANING ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-magic"></i>}
-                        开始深度脱敏 (单线程版)
+                      <button onClick={runPhysicalCleaning} disabled={status === TaskStatus.CLEANING} className="w-full bg-emerald-600 hover:bg-emerald-500 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-emerald-600/20">
+                         {status === TaskStatus.CLEANING ? '引擎全速运转中...' : '开始深度脱敏 (多线程版)'}
                       </button>
                     </div>
                   </div>
@@ -281,7 +278,7 @@ const App: React.FC = () => {
       </div>
       
       <footer className="max-w-6xl mx-auto mt-12 text-center pb-10">
-        <p className="text-[9px] font-bold text-gray-600 uppercase tracking-[0.4em]">Powered by Kie.ai & FFmpeg.WASM (ST) | Secure Processing Environment</p>
+        <p className="text-[9px] font-bold text-gray-600 uppercase tracking-[0.4em]">Powered by Kie.ai & FFmpeg.WASM (Multi-Thread) | Secure Processing Environment</p>
       </footer>
     </div>
   );
