@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 这里的样式会让网页拥有那个暗黑磨砂玻璃质感 */
+body {
+    background-color: #030712;
+    color: white;
+}
