@@ -46,15 +46,17 @@ const App: React.FC = () => {
     try {
       setStatus(TaskStatus.CLEANING);
       setProgress(0);
-      addLog('🛡️ [核心引擎] 启动物理级脱敏...', 'info');
+      addLog('🛡️ [核心引擎] 启动物理级脱敏 (单线程模式)...', 'info');
 
       if (!isFFmpegLoaded.current) {
         addLog('   ↳ 正在加载 WASM 核心...', 'info');
         const { createFFmpeg } = window.FFmpeg;
         
+        // 🔥 核心修改：使用 @ffmpeg/core-st (Single Threaded) 单线程版本
+        // 这个版本不需要 SharedArrayBuffer，可以在无 Headers 环境下完美运行！
         ffmpegRef.current = createFFmpeg({ 
           log: true,
-          corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+          corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
         });
 
         ffmpegRef.current.setProgress(({ ratio }: { ratio: number }) => {
@@ -63,7 +65,7 @@ const App: React.FC = () => {
 
         await ffmpegRef.current.load();
         isFFmpegLoaded.current = true;
-        addLog('   ↳ WASM 引擎就绪。', 'success');
+        addLog('   ↳ WASM 引擎就绪 (兼容模式)。', 'success');
       }
 
       const ffmpeg = ffmpegRef.current;
@@ -228,7 +230,6 @@ const App: React.FC = () => {
                <Logger logs={logs} />
              </div>
              
-             {/* 🔥 核心修复点：只要有源视频，就立刻显示视频播放器和下载按钮 */}
              {(cloudVideoUrl || localFile) && !finalVideoUrl && (
                <div className="space-y-4 animate-in fade-in zoom-in duration-500">
                   <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-2xl">
@@ -237,14 +238,12 @@ const App: React.FC = () => {
                       步骤一完成：原始无水印视频
                     </p>
                     
-                    {/* 强制显示视频 */}
                     <video 
                       src={cloudVideoUrl || (localFile ? URL.createObjectURL(localFile) : '')} 
                       controls 
                       className="w-full rounded-lg bg-black shadow-lg mb-4" 
                     />
                     
-                    {/* 增加【仅下载】按钮，防止你不想做第二步 */}
                     {cloudVideoUrl && (
                       <a href={cloudVideoUrl} target="_blank" rel="noreferrer" download="step1_result.mp4" className="block w-full text-center bg-blue-500/10 hover:bg-blue-500/20 py-2 rounded-lg text-[9px] font-bold text-blue-400 transition-all border border-blue-500/20 mb-4">
                         仅下载此视频 (跳过步骤二)
@@ -256,8 +255,9 @@ const App: React.FC = () => {
                         <i className="fas fa-level-down-alt text-gray-500"></i>
                         <p className="text-[9px] font-bold text-gray-500 uppercase">可选操作：深度清洗</p>
                       </div>
-                      <button onClick={runPhysicalCleaning} disabled={status === TaskStatus.CLEANING} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-blue-600/20">
-                        执行深度脱敏 (RE-ENCODE)
+                      <button onClick={runPhysicalCleaning} disabled={status === TaskStatus.CLEANING} className="w-full bg-emerald-600 hover:bg-emerald-500 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2">
+                        {status === TaskStatus.CLEANING ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-magic"></i>}
+                        开始深度脱敏 (单线程版)
                       </button>
                     </div>
                   </div>
@@ -280,8 +280,8 @@ const App: React.FC = () => {
         </div>
       </div>
       
-      <footer className="max-w-6xl mx-auto mt-12 text-center">
-        <p className="text-[9px] font-bold text-gray-600 uppercase tracking-[0.4em]">Powered by Kie.ai & FFmpeg.WASM | Secure Processing Environment</p>
+      <footer className="max-w-6xl mx-auto mt-12 text-center pb-10">
+        <p className="text-[9px] font-bold text-gray-600 uppercase tracking-[0.4em]">Powered by Kie.ai & FFmpeg.WASM (ST) | Secure Processing Environment</p>
       </footer>
     </div>
   );
