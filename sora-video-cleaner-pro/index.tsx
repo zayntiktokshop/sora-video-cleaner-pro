@@ -1,7 +1,7 @@
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css';  // 👈 必须加这一行！不然就是“毛坯房”
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
